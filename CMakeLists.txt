@@ -122,7 +122,9 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   src/examples/offboard_py/offboard_control.py
+  src/examples/offboard_py/offboard_control3.py
   src/examples/offboard_py/offboard_controlMUAV.py
+  src/examples/offboard_py/offboard_controlMUAVsteps.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

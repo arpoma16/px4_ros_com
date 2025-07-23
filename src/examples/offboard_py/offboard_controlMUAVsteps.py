@@ -11,8 +11,10 @@ import functools
 # Define a simple class to hold drone-specific data
 class Drone:
     """Helper class to encapsulate data and state for each drone."""
-    def __init__(self, drone_id: int):
+    def __init__(self, drone_id: int, takeoff_height: float = -5.0):
         self.id = drone_id
+        self.takeoff_height = takeoff_height - (drone_id-1) *2 # Z-coordinate for takeoff (negative for NED frame)
+        
         # Publishers (will be initialized in the main node)
         self.offboard_control_mode_publisher = None
         self.trajectory_setpoint_publisher = None
@@ -35,6 +37,10 @@ class Drone:
     def get_id(self) -> int:
         """Return the drone's ID."""
         return self.id
+    
+    def is_above_takeoff_height(self) -> bool:
+        """Check if the drone is above its target takeoff height."""
+        return self.vehicle_local_position.z > self.takeoff_height + 1
 
 class MultiDroneOffboardControl(Node):
     """
@@ -58,7 +64,7 @@ class MultiDroneOffboardControl(Node):
 
         # Number of drones to control
         self.num_drones = 3
-        self.takeoff_height = -8.0  # Z-coordinate for takeoff (negative for NED frame)
+        self.default_takeoff_height = -5.0  # Default Z-coordinate for takeoff (negative for NED frame)
 
         # Triangle formation parameters
         self.triangle_radius = 5.0  # Radius of the circle on which triangle vertices lie
@@ -73,7 +79,7 @@ class MultiDroneOffboardControl(Node):
         # Initialize publishers, subscribers, and drone data for each drone
         for i in range(self.num_drones):
             drone_id = i + 1
-            drone = Drone(drone_id)
+            drone = Drone(drone_id, self.default_takeoff_height)
 
             # Define topic names with drone ID prefix
             drone_namespace = f"px4_{drone_id}"
@@ -220,7 +226,7 @@ class MultiDroneOffboardControl(Node):
             # Add global center offset
             target_x = self.triangle_center_x + rel_x + vehicle_offset_x[i]
             target_y = self.triangle_center_y + rel_y
-            target_z = self.takeoff_height # Maintain constant altitude
+            target_z = drone.takeoff_height # Maintain constant altitude
 
             drone.current_target_position = [target_x, target_y, target_z]
 
@@ -252,7 +258,7 @@ class MultiDroneOffboardControl(Node):
             if drone.offboard_setpoint_counter < 10:
                 drone.offboard_setpoint_counter += 1
                 # Publish initial target position for takeoff phase
-                self._publish_position_setpoint(drone, 0.0, 0.0, self.takeoff_height)
+                self._publish_position_setpoint(drone, 0.0, 0.0, drone.takeoff_height)
             elif drone.offboard_setpoint_counter == 10:
                 self.engage_offboard_mode(drone) # Request offboard mode
                 self.arm(drone)                   # Arm the drone
@@ -263,11 +269,10 @@ class MultiDroneOffboardControl(Node):
             # Check if drone is in offboard mode AND not in the process of landing
             if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and not drone.is_landing:
                 # If current altitude is not at takeoff height, move towards it first
-                #if drone.vehicle_local_position.z > self.takeoff_height + 0.1 or drone.vehicle_local_position.z > self.takeoff_height - 1:
-                if drone.vehicle_local_position.z > self.takeoff_height +1 :
+                if drone.is_above_takeoff_height():
                     # Move to takeoff height first
-                    self._publish_position_setpoint(drone, 0.0, 0.0, self.takeoff_height)
-                    self.get_logger().info(f"Drone {drone.id}: Adjusting to takeoff height {self.takeoff_height:.2f} m. Current altitude: {drone.vehicle_local_position.z:.2f} m")
+                    self._publish_position_setpoint(drone, 0.0, 0.0, drone.takeoff_height)
+                    self.get_logger().info(f"Drone {drone.id}: Adjusting to takeoff height {drone.takeoff_height:.2f} m. Current altitude: {drone.vehicle_local_position.z:.2f} m")
                 else:
                     # Once at takeoff height, update triangle positions and publish
                     self._update_triangle_target_positions()
