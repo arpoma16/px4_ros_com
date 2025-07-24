@@ -24,6 +24,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(rclpy REQUIRED)
 
 #################
@@ -125,6 +127,7 @@ install(PROGRAMS
   src/examples/offboard_py/offboard_control3.py
   src/examples/offboard_py/offboard_controlMUAV.py
   src/examples/offboard_py/offboard_controlMUAVsteps.py
+  src/examples/offboard_py/ground_command.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
