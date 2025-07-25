@@ -12,10 +12,17 @@ class OffboardControl(Node):
 
     def __init__(self, drone_id=3, ns='px4_3') -> None:
         super().__init__(f'offboard_control_{drone_id}')
+
         self.get_logger().info('Offboard control node initialized.')
 
-        self.drone_id = drone_id
-        self.ns = ns
+        # Declare and retrieve the namespace parameter
+        self.declare_parameter('namespace', '')  # Default to empty namespace
+        self.namespace = self.get_parameter('namespace').value
+        self.ns = f'/{self.namespace}' if self.namespace else ''
+        
+        self.declare_parameter('MAV_SYS_ID', 1)
+        self.drone_id = self.get_parameter('MAV_SYS_ID').value
+        #self.ns = ns
 
         # Configure QoS profile for publishing and subscribing
         qos_profile = QoSProfile(
@@ -27,28 +34,24 @@ class OffboardControl(Node):
 
         # Create publishers
         self.offboard_control_mode_publisher = self.create_publisher(
-            OffboardControlMode, f'/{ns}/fmu/in/offboard_control_mode', qos_profile)
+            OffboardControlMode, f'{self.ns}/fmu/in/offboard_control_mode', qos_profile)
         self.trajectory_setpoint_publisher = self.create_publisher(
-            TrajectorySetpoint, f'/{ns}/fmu/in/trajectory_setpoint', qos_profile)
+            TrajectorySetpoint, f'{self.ns}/fmu/in/trajectory_setpoint', qos_profile)
         self.vehicle_command_publisher = self.create_publisher(
-            VehicleCommand, f'/{ns}/fmu/in/vehicle_command', qos_profile)
+            VehicleCommand, f'{self.ns}/fmu/in/vehicle_command', qos_profile)
 
         # Create subscribers
         self.gcs_logger_subscriber = self.create_subscription(
-            TrajectorySetpoint, f'/gcs/{ns}/trajectory_setpoint', self.gcs_position_callback, qos_profile)
+            TrajectorySetpoint, f'/gcs{self.ns}/trajectory_setpoint', self.gcs_position_callback, qos_profile)
         self.vehicle_local_position_subscriber = self.create_subscription(
-            VehicleLocalPosition, f'/{ns}/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
+            VehicleLocalPosition, f'{self.ns}/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus, f'/{ns}/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+            VehicleStatus, f'{self.ns}/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
         
         self.land_service = self.create_service(
-            Trigger, f'/{self.ns}/land', self.handle_land_request)
+            Trigger, f'{self.ns}/land', self.handle_land_request)
         self.takeoff_service = self.create_service(
-            Trigger, f'/{self.ns}/takeoff', self.handle_takeoff_request)
-
-
-
-
+            Trigger, f'{self.ns}/takeoff', self.handle_takeoff_request)
 
         # Initialize variables
         self.offboard_setpoint_counter = 0

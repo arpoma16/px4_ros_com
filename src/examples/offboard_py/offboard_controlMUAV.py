@@ -191,7 +191,7 @@ class MultiDroneOffboardControl(Node):
         msg.param7 = params.get("param7", 0.0)
         
         #msg.target_system = drone.get_id() + 1           # Target system ID (usually 1 for PX4)
-        msg.target_system = 1           # Target system ID (usually 1 for PX4)
+        msg.target_system = drone.get_id()            # Target system ID (usually 1 for PX4)
         msg.target_component = 1        # Target component ID (usually 1 for autopilot)
         msg.source_system = 1           # Source system ID
         msg.source_component = 1        # Source component ID
