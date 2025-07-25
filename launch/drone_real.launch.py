@@ -12,11 +12,18 @@ def generate_launch_description():
     # Declare the namespace argument (it can be provided when launching)
     namespace = LaunchConfiguration('namespace', default='px4_3')
 
+    mav_sys_id = LaunchConfiguration('mav_sys_id', default='3')
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'namespace',
             default_value='px4_3',
             description='Namespace of the nodes'
+        ),
+        DeclareLaunchArgument(
+            'mav_sys_id',
+            default_value='3',
+            description='MAVLink system ID'
         ),
         Node(
             package='px4_ros_com',
@@ -25,7 +32,7 @@ def generate_launch_description():
             name='control',
             output='screen',
             parameters= [
-                {'MAV_SYS_ID': 3},
+                {'MAV_SYS_ID': mav_sys_id},
                 {'namespace': namespace}
             ]
         )

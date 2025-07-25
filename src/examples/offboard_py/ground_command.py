@@ -3,7 +3,8 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck, VehicleLocalPosition, VehicleStatus
 from std_srvs.srv import Empty, Trigger
 
 import math
@@ -38,7 +39,7 @@ class Drone:
         self.has_landed = False # Flag to indicate if the drone has completed its landing sequence
         self.is_hovering = False  # Flag to indicate if the drone is hovering at a position
         self.hovering_count = 0  # Counter to manage hovering state
-        self.hovering_duration = 10  # Duration to hover before moving again (in seconds)
+        self.hovering_duration = 40  # Duration to hover before moving again (in seconds)
 
     def get_id(self) -> int:
         """Return the drone's ID."""
@@ -66,10 +67,10 @@ class MultiDroneOffboardControl(Node):
 
         # Number of drones to control
         self.num_drones = 3
-        self.takeoff_height = -5.0  # Z-coordinate for takeoff (negative for NED frame)
+        self.takeoff_height = -10.0  # Z-coordinate for takeoff (negative for NED frame)
 
         # Triangle formation parameters
-        self.triangle_radius = 3.0  # Radius of the circle on which triangle vertices lie
+        self.triangle_radius = 2.0  # Radius of the circle on which triangle vertices lie
         self.triangle_center_x = 0.0
         self.triangle_center_y = 0.0
         self.triangle_rotation_angle = 0.0 # Initial rotation angle for the triangle (radians)
@@ -94,7 +95,7 @@ class MultiDroneOffboardControl(Node):
 
             # Create service clients for each drone
             drone.land_service = self.create_client(Trigger, f'/{drone_namespace}/land')
-            drone.takeoff_service = self.create_client(Trigger, f'/{drone_namespace}/takeoff')
+            drone.takeoff_service = self.create_client(VehicleCommandSrv, f'/{drone_namespace}/takeoff')
 
             # Create subscribers for each drone
             # Use functools.partial to pass the drone object to the callback
@@ -122,7 +123,16 @@ class MultiDroneOffboardControl(Node):
         """
         self.get_logger().info(f"Sending takeoff command for Drone {drone.id} to height {self.takeoff_height:.2f} m")
         if drone.takeoff_service.wait_for_service(timeout_sec=1.0):
-            request = Trigger.Request()
+            request = VehicleCommandSrv.Request()
+            request.request.timestamp = self.get_clock().now().nanoseconds // 1000
+            request.request.param1 = float(self.takeoff_height)  # param1: minimum pitch (not used for takeoff)
+            request.request.param2 = 0.0  # param2:
+            request.request.command = VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF
+            request.request.target_system = 1  # Target system ID (usually 1 for PX4)
+            request.request.target_component = 1  # Target component ID (usually 1 for autopilot)
+            request.request.source_system = 1  # Source system ID
+            request.request.source_component = 1  # Source component ID
+            request.request.from_external = True  # Command from external source (e.g., ROS
             future = drone.takeoff_service.call_async(request)
             # Don't block - just add a callback to handle the response
             #rclpy.spin_until_future_complete(self, future)  this blocks the node, so we use a callback instead
@@ -139,8 +149,8 @@ class MultiDroneOffboardControl(Node):
         """
         try:
             response = future.result()
-            if response.success:
-                self.get_logger().info(f"Takeoff command sent for Drone {drone.id}")
+            if response.reply.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+                self.get_logger().info(f"Takeoff command drone {drone.id} sent successfully.")
             else:
                 self.get_logger().error(f"Failed to send takeoff command for Drone {drone.id}: {response.message}")
         except Exception as e:

@@ -3,8 +3,9 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck,VehicleLocalPosition, VehicleStatus
 from std_srvs.srv import Trigger
+from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
 
 
 class OffboardControl(Node):
@@ -21,8 +22,11 @@ class OffboardControl(Node):
         self.ns = f'/{self.namespace}' if self.namespace else ''
         
         self.declare_parameter('MAV_SYS_ID', 1)
-        self.drone_id = self.get_parameter('MAV_SYS_ID').value
+        self.drone_id = int( self.get_parameter('MAV_SYS_ID').value)
         #self.ns = ns
+        self.get_logger().info(f"Drone {self.ns} mav sys id {self.drone_id}")
+
+
 
         # Configure QoS profile for publishing and subscribing
         qos_profile = QoSProfile(
@@ -48,16 +52,18 @@ class OffboardControl(Node):
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, f'{self.ns}/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
         
+        # Create services for takeoff and landing
         self.land_service = self.create_service(
             Trigger, f'{self.ns}/land', self.handle_land_request)
         self.takeoff_service = self.create_service(
-            Trigger, f'{self.ns}/takeoff', self.handle_takeoff_request)
+            VehicleCommandSrv, f'{self.ns}/takeoff', self.handle_takeoff_request)
 
         # Initialize variables
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
         self.takeoff_height = -5.0
+        self.default_takeoff_height = -5.0  # Default takeoff height
         self.command_position = [0.0, 0.0, self.takeoff_height]
 
         self.doneTakeoff = False
@@ -78,12 +84,13 @@ class OffboardControl(Node):
         self.get_logger().info("Land service called: commandLand set to True")
         return response
 
-    def handle_takeoff_request(self, request, response):
+    def handle_takeoff_request(self, request, reply):
+        self.takeoff_height = request.request.param1 if request.request.param1 else self.default_takeoff_height
         self.commandTakeoff = True
-        response.success = True
-        response.message = "Takeoff command triggered"
-        self.get_logger().info("Takeoff service called: commandTakeoff set to True")
-        return response
+        reply.reply.result = VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED
+        reply.reply.command = VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF
+        self.get_logger().info(f"Takeoff srv with height {self.takeoff_height}   ")
+        return reply
 
     def gcs_position_callback(self, gcs_position):
         """Callback function for GCS position topic subscriber."""
