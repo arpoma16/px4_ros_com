@@ -6,7 +6,16 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck,VehicleLocalPosition, VehicleStatus
 from std_srvs.srv import Trigger
 from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
+from enum import Enum
 
+
+class UAVState(Enum):
+    """Enumeration for UAV states."""
+    IDLE = 0
+    TAKEOFF = 1
+    LANDING = 2
+    FLYING = 3
+    EMERGENCY = 4
 
 class OffboardControl(Node):
     """Node for controlling a vehicle in offboard mode."""
@@ -51,7 +60,9 @@ class OffboardControl(Node):
             VehicleLocalPosition, f'{self.ns}/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, f'{self.ns}/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
-        
+        self.vehicle_cmdResponse_subscriber = self.create_subscription(
+            VehicleCommandAck, f'{self.ns}/fmu/out/vehicle_command_ack', self.vehicle_cmdResponse_callback, qos_profile)
+
         # Create services for takeoff and landing
         self.land_service = self.create_service(
             Trigger, f'{self.ns}/land', self.handle_land_request)
@@ -66,9 +77,8 @@ class OffboardControl(Node):
         self.default_takeoff_height = -5.0  # Default takeoff height
         self.command_position = [0.0, 0.0, self.takeoff_height]
 
-        self.doneTakeoff = False
-        self.commandLand = False
-        self.commandTakeoff = False
+        self.uav_state = UAVState.IDLE
+
         self.armed = False
 
 
@@ -78,7 +88,7 @@ class OffboardControl(Node):
         self.get_logger().info('Timer for control commands created (100ms).')
 
     def handle_land_request(self, request, response):
-        self.commandLand = True
+        self.uav_state = UAVState.LANDING
         response.success = True
         response.message = "Land command triggered"
         self.get_logger().info("Land service called: commandLand set to True")
@@ -86,10 +96,14 @@ class OffboardControl(Node):
 
     def handle_takeoff_request(self, request, reply):
         self.takeoff_height = request.request.param1 if request.request.param1 else self.default_takeoff_height
-        self.commandTakeoff = True
-        reply.reply.result = VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED
         reply.reply.command = VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF
         self.get_logger().info(f"Takeoff srv with height {self.takeoff_height}   ")
+        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and self.armed:
+            self.uav_state = UAVState.TAKEOFF
+            reply.reply.result = VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED
+        else:
+            reply.reply.result = VehicleCommandAck.VEHICLE_CMD_RESULT_TEMPORARILY_REJECTED
+            self.get_logger().info("Takeoff command rejected: Vehicle not in OFFBOARD mode or not armed")
         return reply
 
     def gcs_position_callback(self, gcs_position):
@@ -108,6 +122,9 @@ class OffboardControl(Node):
     def vehicle_status_callback(self, vehicle_status):
         """Callback function for vehicle_status topic subscriber."""
         self.vehicle_status = vehicle_status
+    def vehicle_cmdResponse_callback(self, vehicle_cmdResponse):
+        """Callback function for vehicle_command_ack topic subscriber."""
+        self.get_logger().info(f"Vehicle command response: {vehicle_cmdResponse.command} result: {vehicle_cmdResponse.result}")
 
     def arm(self):
         """Send an arm command to the vehicle."""
@@ -171,7 +188,7 @@ class OffboardControl(Node):
         msg.param5 = params.get("param5", 0.0)
         msg.param6 = params.get("param6", 0.0)
         msg.param7 = params.get("param7", 0.0)
-        msg.target_system = self.drone_id
+        msg.target_system = self.drone_id + 1
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1
@@ -183,37 +200,66 @@ class OffboardControl(Node):
         """Callback function for the timer."""
         self.publish_offboard_control_heartbeat_signal()
 
-        if self.offboard_setpoint_counter == 10 and self.commandTakeoff:
+        if self.offboard_setpoint_counter == 10 :
             self.get_logger().info("Engaging offboard mode and arming the vehicle")
             self.engage_offboard_mode()
             self.arm()
-        
-        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and self.armed:
-            if not self.doneTakeoff:
-                #self.takeoff()
-                self.publish_position_setpoint(0.0,0.0, self.takeoff_height)
 
-                if self.vehicle_local_position.z < self.takeoff_height+ 1:
-                    self.doneTakeoff = True
+        if self.uav_state == UAVState.IDLE:
+            self.publish_position_setpoint(0.0, 0.0, 0.0)
+            self.get_logger().info("UAV is in IDLE state, holding position at (0,0,0)")
+            
+        if self.uav_state == UAVState.TAKEOFF:
+            self.get_logger().info("Takeoff command received, moving to takeoff height")
+            self.publish_position_setpoint(0.0, 0.0, self.takeoff_height)
+            if self.vehicle_local_position.z < self.takeoff_height + 1:
+                self.get_logger().info("Takeoff completed")
+                self.uav_state = UAVState.FLYING
+
+        if self.uav_state == UAVState.FLYING:
+            self.get_logger().info(f"Flying to position: {self.command_position}")
+            self.publish_position_setpoint(self.command_position[0], self.command_position[1], self.command_position[2])
+
+        if self.uav_state == UAVState.LANDING:
+            if (abs(self.vehicle_local_position.x) > 0.5 or abs(self.vehicle_local_position.y) > 0.5 )  :
+                self.get_logger().info(
+                    "Waiting to reach landing position (0,0,{}) | Current position: x={:.2f}, y={:.2f}, z={:.2f}".format(
+                        self.takeoff_height,
+                        self.vehicle_local_position.x,
+                        self.vehicle_local_position.y,
+                        self.vehicle_local_position.z
+                    )
+                )
+                self.publish_position_setpoint(0.0, 0.0, self.takeoff_height)
             else:
-                if not self.commandLand:
-                    self.publish_position_setpoint(self.command_position[0], self.command_position[1], self.command_position[2])
-                else:
-                    self.get_logger().info("Landing command received, moving to landing position")
-                    self.publish_position_setpoint(0.0,0.0, self.takeoff_height)
-                    if abs(self.vehicle_local_position.x) > 0.5 or abs(self.vehicle_local_position.y) > 0.2 or abs(self.vehicle_local_position.z - self.takeoff_height) > 0.5:
-                        self.get_logger().info("Waiting to reach landing position (0,0,{})".format(self.takeoff_height))
-                        self.land()
-                        if self.vehicle_local_position.z > -1:
-                            self.get_logger().info("Landing completed")
-                            self.commandTakeoff = False
-                            self.commandLand = False
-                            self.doneTakeoff = False
-                            self.offboard_setpoint_counter = 0
-                            self.armed = False
-                            exit(0)
+                self.get_logger().info("Landing...")
+                self.land()
+                self.uav_state = UAVState.IDLE
+                self.offboard_setpoint_counter = 0
+                exit(0)
+                
+            #if self.vehicle_local_position.z > -1:
+            #    self.get_logger().info("Landing completed")
+            #    self.disarm()
 
-        if self.offboard_setpoint_counter < 11 and self.commandTakeoff:
+        if self.vehicle_status.nav_state != VehicleStatus.NAVIGATION_STATE_OFFBOARD and self.uav_state == UAVState.FLYING:
+            self.uav_state = UAVState.EMERGENCY
+            self.get_logger().info("Emergency: Vehicle exited OFFBOARD mode during flight")
+
+        if self.uav_state == UAVState.EMERGENCY:
+            self.publish_position_setpoint(0.0, 0.0, self.takeoff_height)       
+        
+        if self.offboard_setpoint_counter == 50:
+            if self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
+                self.get_logger().info("Vehicle is armed")
+            else:
+                self.get_logger().warn("Vehicle failed to arm")
+            if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+                self.get_logger().info("Vehicle is in OFFBOARD mode")
+            else:
+                self.get_logger().warn("Vehicle failed to enter OFFBOARD mode")
+
+        if self.offboard_setpoint_counter < 90:
             self.offboard_setpoint_counter += 1
 
 
