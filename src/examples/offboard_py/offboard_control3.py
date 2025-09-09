@@ -8,6 +8,9 @@ from std_srvs.srv import Trigger
 from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
 from enum import Enum
 
+def fmt_float(val):
+    """Format a float to 2 decimal places as string."""
+    return f"{val:.2f}"
 
 class UAVState(Enum):
     """Enumeration for UAV states."""
@@ -76,10 +79,13 @@ class OffboardControl(Node):
         self.takeoff_height = -5.0
         self.default_takeoff_height = -5.0  # Default takeoff height
         self.command_position = [0.0, 0.0, self.takeoff_height]
+        self.commanded_position = [0.0, 0.0, 0.0]
+        self.takeoff_point = [0.0, 0.0, 0.0]
 
         self.uav_state = UAVState.IDLE
 
         self.armed = False
+        self.control_mode = 'position'  # 'position' or 'velocity'
 
 
         # Create a timer to publish control commands
@@ -97,6 +103,7 @@ class OffboardControl(Node):
     def handle_takeoff_request(self, request, reply):
         self.takeoff_height = request.request.param1 if request.request.param1 else self.default_takeoff_height
         reply.reply.command = VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF
+        self.takeoff_point = [self.vehicle_local_position.x, self.vehicle_local_position.y, self.vehicle_local_position.z]
         self.get_logger().info(f"Takeoff srv with height {self.takeoff_height}   ")
         self.uav_state = UAVState.TAKEOFF
         #if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and self.armed:
@@ -108,7 +115,9 @@ class OffboardControl(Node):
 
     def gcs_position_callback(self, gcs_position):
         """Callback function for GCS position topic subscriber."""
-        self.get_logger().info(f"Rcv pos: {gcs_position.position}")
+        #self.get_logger().info(f"Rcv pos: {gcs_position.position}")
+        #self.get_logger().info(f"Rcv pos: {self.command_position}")
+        
         # gcs_position.position is already a list of 3 floats [x, y, z]
         # Ensure values are float type
         self.command_position[0] = float(gcs_position.position[0])
@@ -146,11 +155,12 @@ class OffboardControl(Node):
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
         self.get_logger().info("Switching to offboard mode")
 
-    def takeoff(self):
+    def takeoff(self, altitude: float = 5.0):
         """Send a takeoff command to the vehicle."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param1=0.0, param2=0.0, param3=0.0, param4=0.0, param5=0.0, param6=0.0, param7= self.takeoff_height)
-        self.get_logger().info("Takeoff command sent")
+            VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param7=altitude)
+        self.get_logger().info(f"Takeoff command sent with altitude: {altitude}")
+
     def land(self):
         """Switch to land mode."""
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
@@ -159,19 +169,28 @@ class OffboardControl(Node):
     def publish_offboard_control_heartbeat_signal(self):
         """Publish the offboard control mode."""
         msg = OffboardControlMode()
-        msg.position = True
-        msg.velocity = False
+        if self.control_mode == 'position':
+            msg.position = True
+            msg.velocity = False
+        elif self.control_mode == 'velocity':
+            msg.position = False
+            msg.velocity = True
         msg.acceleration = False
         msg.attitude = False
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_control_mode_publisher.publish(msg)
 
-    def publish_position_setpoint(self, x: float, y: float, z: float):
+    def publish_position_setpoint(self, x: float, y: float, z: float,vx:float =0.0, vy:float =0.0, vz:float =0.0) -> None:
         """Publish the trajectory setpoint."""
+        self.commanded_position[0] = x
+        self.commanded_position[1] = y
+        self.commanded_position[2] = z
+
         msg = TrajectorySetpoint()
         # Ensure all values are explicitly float type
         msg.position = [float(x), float(y), float(z)]
+        msg.velocity = [float(vx), float(vy), float(vz)]
         msg.yaw = 1.57079  # (90 degree)
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
@@ -188,7 +207,7 @@ class OffboardControl(Node):
         msg.param5 = params.get("param5", 0.0)
         msg.param6 = params.get("param6", 0.0)
         msg.param7 = params.get("param7", 0.0)
-        msg.target_system = self.drone_id + 1
+        msg.target_system = self.drone_id 
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1
@@ -200,30 +219,42 @@ class OffboardControl(Node):
         """Callback function for the timer."""
         self.publish_offboard_control_heartbeat_signal()
 
-        
+        self.get_logger().info(
+            f"M: {self.uav_state} - Cmded: [{fmt_float(self.commanded_position[0])}, {fmt_float(self.commanded_position[1])}, {fmt_float(self.commanded_position[2])}] "
+            f"- Real: [{fmt_float(self.vehicle_local_position.x)}, {fmt_float(self.vehicle_local_position.y)}, {fmt_float(self.vehicle_local_position.z)}]"
+        )
+
         #if self.uav_state == UAVState.IDLE:
         #    self.publish_position_setpoint(0.0, 0.0, 0.0)
         #    self.get_logger().info("UAV is in IDLE state, holding position at (0,0,0)")
-            
+        #self.get_logger().info("UAV mode {} in IDLE state, holding position at (0,0,0)")
         if self.uav_state == UAVState.TAKEOFF:
-            self.get_logger().info("Takeoff command received, moving to takeoff height")
+            #self.get_logger().info("Takeoff command received, moving to takeoff height")
             
             if self.offboard_setpoint_counter == 10 :
                 self.get_logger().info("Engaging offboard mode and arming the vehicle")
                 self.engage_offboard_mode()
                 self.arm()
-            
-            if self.offboard_setpoint_counter < 90:
-                self.offboard_setpoint_counter += 1
 
-            self.publish_position_setpoint(0.0, 0.0, self.takeoff_height)
+            if self.vehicle_local_position.z - self.takeoff_point[2] >= -1.0:
+                #self.control_mode = 'velocity'
+                self.get_logger().info("Rising to takeoff speed")
+                self.publish_position_setpoint(self.takeoff_point[0], self.takeoff_point[1], self.takeoff_point[2] + -1.2)
+            else:
+                #self.control_mode = 'position'
+                self.get_logger().info("Rising to takeoff position")
+                self.publish_position_setpoint(0.0, 0.0, self.takeoff_height)
+
             
-            if self.vehicle_local_position.z < self.takeoff_height + 1:
+            if self.vehicle_local_position.z < self.takeoff_height + 0.5:
                 self.get_logger().info("Takeoff completed")
                 self.uav_state = UAVState.FLYING
 
+            if self.offboard_setpoint_counter < 90:
+                self.offboard_setpoint_counter += 1
+
         if self.uav_state == UAVState.FLYING:
-            self.get_logger().info(f"Flying to position: {self.command_position}")
+            #self.get_logger().info(f"Flying to position: {self.command_position}")
             self.publish_position_setpoint(self.command_position[0], self.command_position[1], self.command_position[2])
 
         if self.uav_state == UAVState.LANDING:
