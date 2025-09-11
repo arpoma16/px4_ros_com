@@ -39,7 +39,7 @@ class Drone:
         self.has_landed = False # Flag to indicate if the drone has completed its landing sequence
         self.is_hovering = False  # Flag to indicate if the drone is hovering at a position
         self.hovering_count = 0  # Counter to manage hovering state
-        self.hovering_duration = 40  # Duration to hover before moving again (in seconds)
+        self.hovering_duration = 30  # Duration to hover before moving again (in seconds)
         self.takeoff_height= -5 # take off altitude 
 
     def get_id(self) -> int:
@@ -67,7 +67,10 @@ class MultiDroneOffboardControl(Node):
         )
 
         # Number of drones to control
-        self.num_drones = 3
+        self.list_drone_id = [1,2,4]
+
+        self.num_drones = len(self.list_drone_id)
+        self.get_logger().info(f"Configuring for {self.num_drones} drones with IDs: {self.list_drone_id}")
         self.takeoff_height = -5.0  # Z-coordinate for takeoff (negative for NED frame)
 
         # Triangle formation parameters
@@ -83,13 +86,13 @@ class MultiDroneOffboardControl(Node):
         
 
         # Initialize publishers, subscribers, and drone data for each drone
-        for i in range(self.num_drones):
-            drone_id = i + 1
+        for i in self.list_drone_id:
+            drone_id = i
             drone = Drone(drone_id)
 
             # Define topic names with drone ID prefix
             drone_namespace = f"px4_{drone_id}"
-            drone.takeoff_height = self.takeoff_height -i*2
+            drone.takeoff_height = self.takeoff_height -i
             
             # Create publishers for each drone
             drone.trajectory_setpoint_publisher = self.create_publisher(
