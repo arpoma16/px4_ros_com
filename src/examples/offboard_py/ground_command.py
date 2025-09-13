@@ -23,9 +23,7 @@ class Drone:
         self.vehicle_status_subscriber = None
 
         # drone call services
-        self.land_service = None
-        self.takeoff_service = None
-
+        self.offboard_cmd_service = None
         # Drone's current state
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
@@ -67,7 +65,7 @@ class MultiDroneOffboardControl(Node):
         )
 
         # Number of drones to control
-        self.list_drone_id = [1,2,4]
+        self.list_drone_id = [1,2,3]
 
         self.num_drones = len(self.list_drone_id)
         self.get_logger().info(f"Configuring for {self.num_drones} drones with IDs: {self.list_drone_id}")
@@ -96,14 +94,14 @@ class MultiDroneOffboardControl(Node):
             
             # Create publishers for each drone
             drone.trajectory_setpoint_publisher = self.create_publisher(
-                TrajectorySetpoint, f'/gcs/{drone_namespace}/trajectory_setpoint', qos_profile)
+                TrajectorySetpoint, f'/{drone_namespace}/fmu/in/trajectory_setpoint_offboard', qos_profile)
+            drone.vehicle_command_publisher = self.create_publisher(
+                VehicleCommand, f'/{drone_namespace}/fmu/in/vehicle_command_offboard', qos_profile)
 
             # Create service clients for each drone
-            drone.land_service = self.create_client(Trigger, f'/{drone_namespace}/land')
-            drone.takeoff_service = self.create_client(VehicleCommandSrv, f'/{drone_namespace}/takeoff')
-
+            drone.offboard_cmd_service = self.create_client(VehicleCommandSrv, f'/{drone_namespace}/takeoff')
+            
             # Create subscribers for each drone
-            # Use functools.partial to pass the drone object to the callback
             drone.vehicle_local_position_subscriber = self.create_subscription(
                 VehicleLocalPosition, f'/{drone_namespace}/fmu/out/vehicle_local_position', 
                 functools.partial(self.vehicle_local_position_callback, drone=drone), qos_profile)
@@ -111,81 +109,79 @@ class MultiDroneOffboardControl(Node):
                 VehicleStatus, f'/{drone_namespace}/fmu/out/vehicle_status', 
                 functools.partial(self.vehicle_status_callback, drone=drone), qos_profile)
             
+            drone.vehicle_command_offboard_ack_subscriber = self.create_subscription(
+                VehicleCommandAck, f'/{drone_namespace}/fmu/out/vehicle_command_offboard_ack',
+                functools.partial(self.vehicle_command_offboard_ack_callback, drone=drone), qos_profile)
+
             self.drones.append(drone)
             self.get_logger().info(f"Initialized publishers and subscribers for drone {drone_id} under namespace /{drone_namespace}")
 
-        # Create a service server for landing all drones
-        #self.land_service = self.create_service(Empty, 'land_all_drones', self.land_all_drones_callback)
-        #self.get_logger().info('ROS 2 service "land_all_drones" created.')
 
         # Create a timer to publish control commands and manage drone states
         self.timer = self.create_timer(0.1, self.timer_callback) # 100ms timer
         self.get_logger().info('Timer for control commands created (100ms).')
+
 
     def send_takeoff_command(self, drone: Drone):
         """
         Send a takeoff command to the specified drone.
         """
         self.get_logger().info(f"Sending takeoff command for Drone {drone.id} to height {drone.takeoff_height:.2f} m")
-        if drone.takeoff_service.wait_for_service(timeout_sec=1.0):
-            request = VehicleCommandSrv.Request()
-            request.request.timestamp = self.get_clock().now().nanoseconds // 1000
-            request.request.param1 = float(drone.takeoff_height)  # param1: minimum pitch (not used for takeoff)
-            request.request.param2 = 0.0  # param2:
-            request.request.command = VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF
-            request.request.target_system = 1  # Target system ID (usually 1 for PX4)
-            request.request.target_component = 1  # Target component ID (usually 1 for autopilot)
-            request.request.source_system = 1  # Source system ID
-            request.request.source_component = 1  # Source component ID
-            request.request.from_external = True  # Command from external source (e.g., ROS
-            future = drone.takeoff_service.call_async(request)
-            # Don't block - just add a callback to handle the response
-            #rclpy.spin_until_future_complete(self, future)  this blocks the node, so we use a callback instead
-            # Use a lambda to pass the drone object to the callback
+        
+        self.call_command_service(drone, VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param1=drone.takeoff_height)
 
-            future.add_done_callback(lambda f: self._handle_takeoff_response(f, drone))
-        else:
-            self.get_logger().error(f"Takeoff service not available for Drone {drone.id}")
-            drone.unavailable = True  # Mark drone as unavailable if service is not available
-    
-    def _handle_takeoff_response(self, future, drone: Drone):
-        """
-        Handle the response from the takeoff service call.
-        """
-        try:
-            response = future.result()
-            if response.reply.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
-                self.get_logger().info(f"Takeoff command drone {drone.id} sent successfully.")
-            else:
-                self.get_logger().error(f"Failed to send takeoff command for Drone {drone.id}: {response.message}")
-        except Exception as e:
-            self.get_logger().error(f"Exception in takeoff service call for Drone {drone.id}: {str(e)}")
-    
     def send_land_command(self, drone: Drone):
         """
         Send a land command to the specified drone.
         """
         self.get_logger().info(f"Sending land command for Drone {drone.id}")
-        if drone.land_service.wait_for_service(timeout_sec=1.0):
-            request = Trigger.Request()
-            future = drone.land_service.call_async(request)
-            # Don't block - just add a callback to handle the response
-            future.add_done_callback(lambda f: self._handle_land_response(f, drone))
-        else:
-            self.get_logger().error(f"Land service not available for Drone {drone.id}")
+        self.call_command_service(drone, VehicleCommand.VEHICLE_CMD_NAV_LAND)
 
-    def _handle_land_response(self, future, drone: Drone):
+
+    def call_command_service(self, drone: Drone, command: int, **params):
+        """ Call the vehicle command service for the specified drone.
         """
-        Handle the response from the land service call.
+
+        if drone.offboard_cmd_service.wait_for_service(timeout_sec=1.0):
+            request = VehicleCommandSrv.Request()
+            request.request.command = command
+            request.request.param1 = params.get('param1', 0.0) 
+            request.request.param2 = params.get('param2', 0.0)
+            request.request.param3 = params.get('param3', 0.0)
+            request.request.param4 = params.get('param4', 0.0)
+            request.request.param5 = params.get('param5', 0.0)
+            request.request.param6 = params.get('param6', 0.0)
+            request.request.param7 = params.get('param7', 0.0)
+            request.request.target_system = 1  
+            request.request.target_component = 1  
+            request.request.source_system = 1  
+            request.request.source_component = 1  
+            request.request.from_external = True  
+            request.request.timestamp = self.get_clock().now().nanoseconds // 1000
+            future = drone.offboard_cmd_service.call_async(request)
+            # Don't block - just add a callback to handle the response
+            #rclpy.spin_until_future_complete(self, future)  this blocks the node, so we use a callback instead
+            # Use a lambda to pass the drone object to the callback
+
+            future.add_done_callback(lambda f: self._handle_offboard_cmd_response(f, drone))
+        else:
+            self.get_logger().error(f"Takeoff service not available for Drone {drone.id}")
+            drone.unavailable = True  # Mark drone as unavailable if service is not available
+
+    def _handle_offboard_cmd_response(self, future, drone: Drone):
+        """
+        Handle the response from the offboard command service call.
         """
         try:
             response = future.result()
-            if response.success:
-                self.get_logger().info(f"Land command sent for Drone {drone.id}")
+            if response.reply.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+                self.get_logger().info(f"Offboard command {response.reply.command} for drone {drone.id} sent successfully.")
             else:
-                self.get_logger().error(f"Failed to send land command for Drone {drone.id}: {response.message}")
+                self.get_logger().error(f"Failed to send offboard command {response.reply.command} for Drone {drone.id}: {response.message}")
         except Exception as e:
-            self.get_logger().error(f"Exception in land service call for Drone {drone.id}: {str(e)}")
+            self.get_logger().error(f"Exception in offboard command service call for Drone {drone.id}: {str(e)}")
+            drone.unavailable = True  # Mark drone as unavailable if service call fails
+
 
     def vehicle_local_position_callback(self, vehicle_local_position: VehicleLocalPosition, drone: Drone):
         """
@@ -202,6 +198,27 @@ class MultiDroneOffboardControl(Node):
         """
         drone.vehicle_status = vehicle_status
         # self.get_logger().debug(f"Drone {drone.id} status: nav_state={vehicle_status.nav_state}, arm_state={vehicle_status.arming_state}")
+
+    def vehicle_command_offboard_ack_callback(self, vehicle_cmdResponse, drone: Drone):
+        """Callback function for vehicle_command_ack topic subscriber."""
+        self.get_logger().info(f"Drone {drone.id}: Cmd response: {vehicle_cmdResponse.command} result: {vehicle_cmdResponse.result}")
+
+        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
+            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+                self.get_logger().info(f"Drone {drone.id}: Vehicle armed successfully")
+            else:
+                self.get_logger().warn(f"Drone {drone.id}: Vehicle failed to arm")
+        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF:
+            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+                self.get_logger().info(f"Drone {drone.id}: Takeoff command accepted")
+            else:
+                self.get_logger().warn(f"Drone {drone.id}: Takeoff command failed")
+        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_LAND:
+            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+                self.get_logger().info(f"Drone {drone.id}: Land command accepted")
+            else:
+                self.get_logger().warn(f"Drone {drone.id}: Land command failed")
+
 
     def land_all_drones_callback(self, request: Empty.Request, response: Empty.Response):
         """
@@ -231,6 +248,12 @@ class MultiDroneOffboardControl(Node):
         self._publish_vehicle_command(
             drone, VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0) # 1.0 for custom mode, 6.0 for Offboard
         self.get_logger().info(f"Switching Drone {drone.id} to offboard mode")
+
+    def takeoff(self, drone: Drone, altitude: float = 5.0):
+        """Send a takeoff command to the vehicle."""
+        self._publish_vehicle_command(
+            drone, VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param1=1.0, param7=altitude)
+        self.get_logger().info(f"Takeoff command sent with altitude: {altitude}")
 
     def land(self, drone: Drone):
         """Switch to land mode."""
@@ -334,9 +357,9 @@ class MultiDroneOffboardControl(Node):
             #self.get_logger().info(f"Drone {drone.id} status: nav_state={drone.vehicle_status.nav_state}, arm_state={drone.vehicle_status.arming_state}")
 
             if not drone.is_takeoff:
-                self.send_takeoff_command(drone)
+                self.takeoff(drone, drone.takeoff_height)
                 drone.is_takeoff = True # Reset takeoff flag after sending command
-            if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+            if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD and drone.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED:
                 if (drone.vehicle_local_position.z > drone.takeoff_height + 1 or drone.is_hovering )and self.round_count ==0:
                     self._publish_position_setpoint(drone, 0.0, 0.0, drone.takeoff_height)
                     drone.is_hovering = True
@@ -358,9 +381,9 @@ class MultiDroneOffboardControl(Node):
                         self.get_logger().debug(f"Drone {drone.id}: Moving to triangle pos {drone.current_target_position}")
                     else:
                         # If round count exceeds duration, switch to landing
-                        self.send_land_command(drone)
+                        self.land(drone)
                         drone.has_landed = True
-                        self.get_logger().info(f"Drone {drone.id} has completed triangle rounds. Initiating landing.")
+                        self.get_logger().info(f"Drone {drone.id} has completed circle rounds. Initiating landing.")
       # Shut down the node if all drones have landed
         if all_drones_landed : # Avoid shutting down immediately on start
             self.get_logger().info('All drones have landed. Shutting down node.')
