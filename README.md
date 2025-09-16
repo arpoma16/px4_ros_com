@@ -1,3 +1,20 @@
+# repo:
+https://github.com/arpoma16/px4_ros_com
+# ground publish messages:
+ros2 run px4_ros_com ground_command.py
+
+
+# drone offboard script:
+ros2 launch px4_ros_com drone_real.launch.py
+
+en el launch se puede configurar el nombre nombre del drone(name_espace) y el mav_system_id
+
+
+# drone offboard codes:
+/px4_3/fmu/in/vehicle_command_offboard :  recive los commandos desde tierra del drone   igual que el topico vehicle_commnad
+/px4_3/fmu/out/vehicle_command_offboard_ack : devuelve la respues de los commandos igual que el topico vehicle_command_ack
+/px4_3/fmu/in/trajectory_setpoint_offboard : recive las posiciones a las que se tiene que mover el drone igual que el topico trajectory_setpoint
+
 # PX4-ROS2 bridge
 
 [![GitHub license](https://img.shields.io/github/license/PX4/px4_ros_com.svg)](https://github.com/PX4/px4_ros_com/blob/master/LICENSE) [![GitHub (pre-)release](https://img.shields.io/github/release-pre/PX4/px4_ros_com.svg)](https://github.com/PX4/px4_ros_com/releases/tag/beta) [![DOI](https://zenodo.org/badge/142936318.svg)](https://zenodo.org/badge/latestdoi/142936318) [![Build and Test package](https://github.com/PX4/px4_ros_com/workflows/Build%20and%20Test%20package/badge.svg?branch=master)](https://github.com/PX4/px4_ros_com/actions)
