@@ -88,7 +88,7 @@ class OffboardControl(Node):
         self.takeoff_height = -5.0
         self.default_takeoff_height = -5.0  # Default takeoff height
         self.command_position = [0.0, 0.0, self.takeoff_height]
-        self.commanded_position = [0.0, 0.0, 0.0]
+        self.commanded_position = [0.0, 0.0, self.takeoff_height]
         self.takeoff_point = [0.0, 0.0, 0.0]
 
         self.vehicle_status = VehicleStatus()
@@ -105,7 +105,7 @@ class OffboardControl(Node):
     def vehicle_cmd_offboard_callback(self, vehicle_command):
         """Callback function for vehicle_command_offboard topic subscriber."""
         self.get_logger().info(
-            f"Rcv vehicle command offboard: {vehicle_command.command} param1: {vehicle_command.param1} param2: {vehicle_command.param2} param3: {vehicle_command.param3} param4: {vehicle_command.param4} param5: {vehicle_command.param5} param6: {vehicle_command.param6} param7: {vehicle_command.param7}")
+            f"Rcv offboard CMD: {vehicle_command.command} param1: {vehicle_command.param1} param2: {vehicle_command.param2} param3: {vehicle_command.param3} param4: {vehicle_command.param4} param5: {vehicle_command.param5} param6: {vehicle_command.param6} param7: {vehicle_command.param7}")
 
         if vehicle_command.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
             if vehicle_command.param1 == 1.0:
@@ -117,7 +117,8 @@ class OffboardControl(Node):
 
         elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_DO_SET_MODE:
             if vehicle_command.param1 == 1.0 and vehicle_command.param2 == 6.0:
-                #self.get_logger().info(f"Switching to OFFBOARD mode")
+                self.get_logger().info(f"Switching to OFFBOARD mode")
+                self.uav_state = UAVState.OFFBOARD
                 self.engage_offboard_mode()
 
         elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF:
@@ -125,9 +126,10 @@ class OffboardControl(Node):
             self.takeoff_height = height
             self.takeoff_point = [self.vehicle_local_position.x,
                                   self.vehicle_local_position.y, self.vehicle_local_position.z]
+            self.takeoff(height)
             #self.get_logger().info(
             #    f"Takeoff command received with height {self.takeoff_height}")
-            self.uav_state = UAVState.TAKEOFF
+            #self.uav_state = UAVState.TAKEOFF
 
         elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_NAV_LAND:
             self.get_logger().info("Land command received")

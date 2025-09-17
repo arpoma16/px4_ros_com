@@ -428,20 +428,22 @@ class MultiDroneOffboardControl(Node):
                     drone.uav_state = UAVState.TAKEOFF
 
             if drone.uav_state == UAVState.TAKEOFF:
-                self.takeoff(drone, drone.takeoff_height)
                 self.arm(drone)
+                self.takeoff(drone, drone.takeoff_height)
                 # if drone.vehicle_local_position.z <= drone.takeoff_height + 0.5: # Allow some tolerance
                 if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_TAKEOFF:
                     drone.uav_state = UAVState.LOITER
 
             if drone.uav_state == UAVState.LOITER:
+                self.arm(drone)
                 if (drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LOITER):
                     drone.uav_state = UAVState.OFFBOARD
                     self.get_logger().info(f"Loiter, Offboard")
 
             if drone.uav_state == UAVState.OFFBOARD:
-                if drone.vehicle_status.nav_state != VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+                if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LOITER:
                     self.engage_offboard_mode(drone)
+                    self.arm(drone)
                 if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
                     self.offboard_commanding(drone)
 
