@@ -443,7 +443,6 @@ class MultiDroneOffboardControl(Node):
             if drone.uav_state == UAVState.OFFBOARD:
                 if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LOITER:
                     self.engage_offboard_mode(drone)
-                    self.arm(drone)
                 if drone.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
                     self.offboard_commanding(drone)
 
