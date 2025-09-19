@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import TelemetryStatus, OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck, VehicleLocalPosition, VehicleStatus, GotoSetpoint
+from px4_msgs.msg import TelemetryStatus, OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck, VehicleLocalPosition, VehicleStatus, GotoSetpoint, VehicleGlobalPosition
 from std_srvs.srv import Trigger
 from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
 from enum import Enum
@@ -71,6 +71,8 @@ class OffboardControl(Node):
             TrajectorySetpoint, f'{self.ns}/fmu/in/trajectory_setpoint_offboard', self.gcs_position_callback, qos_profile)
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, f'{self.ns}/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
+        self.vehicle_global_position_subscriber = self.create_subscription(
+            VehicleGlobalPosition, f'{self.ns}/fmu/out/vehicle_global_position', self.vehicle_global_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, f'{self.ns}/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
         self.vehicle_cmdResponse_subscriber = self.create_subscription(
@@ -97,6 +99,10 @@ class OffboardControl(Node):
         self.failsafe = False
         self.flightCheck = False
 
+        self.lat = 0
+        self.lon = 0
+        self.alt = 0
+
         self.uav_state = UAVState.IDLE
 
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -104,21 +110,20 @@ class OffboardControl(Node):
 
     def vehicle_cmd_offboard_callback(self, vehicle_command):
         """Callback function for vehicle_command_offboard topic subscriber."""
-        self.get_logger().info(
-            f"Rcv offboard CMD: {vehicle_command.command} param1: {vehicle_command.param1} param2: {vehicle_command.param2} param3: {vehicle_command.param3} param4: {vehicle_command.param4} param5: {vehicle_command.param5} param6: {vehicle_command.param6} param7: {vehicle_command.param7}")
+        #self.get_logger().info(
+        #    f"Rcv offboard CMD: {vehicle_command.command} param1: {vehicle_command.param1} param2: {vehicle_command.param2} param3: {vehicle_command.param3} param4: {vehicle_command.param4} param5: {vehicle_command.param5} param6: {vehicle_command.param6} param7: {vehicle_command.param7}")
 
         if vehicle_command.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
             if vehicle_command.param1 == 1.0:
-                #self.get_logger().info(f"Arming UAV")
+                # self.get_logger().info(f"Arming UAV")
                 self.arm()
             elif vehicle_command.param1 == 0.0:
-                #self.get_logger().info(f"Disarming UAV")
+                # self.get_logger().info(f"Disarming UAV")
                 self.disarm()
 
-        elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_DO_SET_MODE:
-            if vehicle_command.param1 == 1.0 and vehicle_command.param2 == 6.0:
-                self.uav_state = UAVState.OFFBOARD
-                self.engage_offboard_mode()
+        elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_DO_SET_MODE and vehicle_command.param1 == 1.0 and vehicle_command.param2 == 6.0:
+            self.uav_state = UAVState.OFFBOARD
+            self.engage_offboard_mode()
 
         elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF:
             height = vehicle_command.param7 if vehicle_command.param7 != 0.0 else self.default_takeoff_height
@@ -126,12 +131,9 @@ class OffboardControl(Node):
             self.takeoff_point = [self.vehicle_local_position.x,
                                   self.vehicle_local_position.y, self.vehicle_local_position.z]
             self.takeoff(height)
-            #self.get_logger().info(
-            #    f"Takeoff command received with height {self.takeoff_height}")
-            #self.uav_state = UAVState.TAKEOFF
 
         elif vehicle_command.command == VehicleCommand.VEHICLE_CMD_NAV_LAND:
-            self.get_logger().info("Land command received")
+            #self.get_logger().info("Land command received")
             self.uav_state = UAVState.LANDING
         else:
             self.get_logger().info(
@@ -178,6 +180,11 @@ class OffboardControl(Node):
     def vehicle_local_position_callback(self, vehicle_local_position):
         """Callback function for vehicle_local_position topic subscriber."""
         self.vehicle_local_position = vehicle_local_position
+    def vehicle_global_position_callback(self, msg: VehicleGlobalPosition):
+        """Callback function for vehicle_global_position topic subscriber."""
+        self.lat = msg.lat
+        self.lon = msg.lon
+        self.alt = msg.alt
 
     def vehicle_status_callback(self, vehicle_status):
         """Callback function for vehicle_status topic subscriber."""
@@ -216,26 +223,27 @@ class OffboardControl(Node):
 
     def vehicle_cmdResponse_callback(self, vehicle_cmdResponse):
         """Callback function for vehicle_command_ack topic subscriber."""
-        self.get_logger().info(
-            f"Cmd response: {vehicle_cmdResponse.command} result: {vehicle_cmdResponse.result}")
-        self.vehicle_command_offboard_ack_publisher.publish(vehicle_cmdResponse)
-        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
-            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
-                self.get_logger().info("Vehicle armed successfully")
-            else:
-                self.get_logger().warn("Vehicle failed to arm")
-        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF:
-            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
-                self.get_logger().info("Takeoff command accepted")
-            else:
-                self.get_logger().warn("Takeoff command failed")
-                self.uav_state = UAVState.IDLE
-        if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_LAND:
-            if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
-                self.get_logger().info("Land command accepted")
-            else:
-                self.get_logger().warn("Land command failed")
-                self.uav_state = UAVState.FLYING
+        #self.get_logger().info(
+        #    f"Cmd response: {vehicle_cmdResponse.command} result: {vehicle_cmdResponse.result}")
+        self.vehicle_command_offboard_ack_publisher.publish(
+            vehicle_cmdResponse)
+        #if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
+        #    if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+        #        self.get_logger().info("Vehicle armed successfully")
+        #    else:
+        #        self.get_logger().warn("Vehicle failed to arm")
+        #if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF:
+        #    if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+        #        self.get_logger().info("Takeoff command accepted")
+        #    else:
+        #        self.get_logger().warn("Takeoff command failed")
+        #        self.uav_state = UAVState.IDLE
+        #if vehicle_cmdResponse.command == VehicleCommand.VEHICLE_CMD_NAV_LAND:
+        #    if vehicle_cmdResponse.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED:
+        #        self.get_logger().info("Land command accepted")
+        #    else:
+        #        self.get_logger().warn("Land command failed")
+        
 
     def telemetry_publish(self):
         msg = TelemetryStatus()
@@ -292,7 +300,7 @@ class OffboardControl(Node):
         """Send an arm command to the vehicle."""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
-        self.get_logger().info('Arm command sent')
+        #self.get_logger().info('Arm command sent')
 
     def disarm(self):
         """Send a disarm command to the vehicle."""
@@ -304,12 +312,20 @@ class OffboardControl(Node):
         """Switch to offboard mode."""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
-        self.get_logger().info("Switching to offboard mode")
+        #self.get_logger().info("Switching to offboard mode")
+
+    def engage_altitude_mode(self):
+        """Switch to altitude mode."""
+        self.publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=5.0)
+        self.get_logger().info("Switching to altitude mode")
 
     def takeoff(self, altitude: float = 5.0):
-        """Send a takeoff command to the vehicle."""
+        '''
+        take off to the specified MSL altitude
+        '''
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param1=1.0, param7=abs(altitude))
+            VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF, param1=1.0, param4=float('nan'), param5=float('nan'), param6=float('nan'), param7= float(self.alt + abs(altitude)))
         self.get_logger().info(
             f"Takeoff command sent with altitude: {altitude}")
 
@@ -377,51 +393,27 @@ class OffboardControl(Node):
         """Callback function for the timer."""
         self.telemetry_publish()
 
-        self.get_logger().info(
-            f"M: {self.uav_state} - s: {self.vehicle_status.nav_state} - Cmded: [{fmt_float(self.commanded_position[0])}, {fmt_float(self.commanded_position[1])}, {fmt_float(self.commanded_position[2])}] "
-            f"- Real: [{fmt_float(self.vehicle_local_position.x)}, {fmt_float(self.vehicle_local_position.y)}, {fmt_float(self.vehicle_local_position.z)}]"
-        )
+        # self.get_logger().info(
+        #    f"M: {self.uav_state} - s: {self.vehicle_status.nav_state} - Cmded: [{fmt_float(self.commanded_position[0])}, {fmt_float(self.commanded_position[1])}, {fmt_float(self.commanded_position[2])}] "
+        #    f"- Real: [{fmt_float(self.vehicle_local_position.x)}, {fmt_float(self.vehicle_local_position.y)}, {fmt_float(self.vehicle_local_position.z)}]"
+        # )
 
-        if self.uav_state == UAVState.TAKEOFF:
-            # waits in this state while taking off, and the
-            # moment VehicleStatus switches to Loiter state it will switch to offboard
-            if (not (self.flightCheck)):
-                self.uav_state = UAVState.IDLE
-                self.get_logger().info(f"Takeoff, Flight Check Failed")
-            elif (self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_TAKEOFF):
-                self.uav_state = UAVState.LOITER
-                self.get_logger().info(f"Takeoff, Loiter")
-            # self.arm() #send arm command
-            # self.takeoff() #send takeoff command
-
-        if self.uav_state == UAVState.LOITER:
-            if (not (self.flightCheck)):
-                self.uav_state = UAVState.IDLE
-                self.get_logger().info(f"Loiter, Flight Check Failed")
-            elif (self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LOITER):
-                self.uav_state = UAVState.OFFBOARD
-                self.get_logger().info(f"Loiter, Offboard")
 
         if self.uav_state == UAVState.OFFBOARD:
             if (not (self.flightCheck) or self.arm_state != VehicleStatus.ARMING_STATE_ARMED or self.failsafe == True):
                 self.uav_state = UAVState.IDLE
                 self.get_logger().info(f"Offboard, Flight Check Failed")
 
-            #if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
             self.publish_offboard_control_heartbeat_signal()
             self.publish_position_setpoint(
                 self.command_position[0], self.command_position[1], self.command_position[2])
 
         if self.uav_state == UAVState.LANDING:
-            if (not (self.flightCheck) or self.arm_state != VehicleStatus.ARMING_STATE_ARMED or self.failsafe == True):
-                self.uav_state = UAVState.IDLE
-                self.get_logger().info(f"Landing, Flight Check Failed")
             if (self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND):
                 self.get_logger().info(f"Landing, Landed")
                 self.uav_state = UAVState.IDLE
                 self.offboard_setpoint_counter = 0
-            else:
-                self.land()
+            self.land()
 
 
 def main(args=None) -> None:
