@@ -84,7 +84,7 @@ class MultiDroneOffboardControl(Node):
         )
 
         # Number of drones to control
-        self.list_drone_id = [3]
+        self.list_drone_id = [1,2,3]
 
         self.num_drones = len(self.list_drone_id)
         self.get_logger().info(

@@ -94,6 +94,8 @@ class OffboardControl(Node):
         self.takeoff_point = [0.0, 0.0, 0.0]
 
         self.vehicle_status = VehicleStatus()
+        self.vehicle_pos_cmd = TrajectorySetpoint()
+        self.vehicle_pos_cmd.position = [0.0, 0.0, self.takeoff_height]
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
         self.arm_state = VehicleStatus.ARMING_STATE_DISARMED
         self.failsafe = False
@@ -170,12 +172,13 @@ class OffboardControl(Node):
         reply.reply.result = VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED
         return reply
 
-    def gcs_position_callback(self, gcs_position):
+    def gcs_position_callback(self, msg: TrajectorySetpoint):
         """Callback function for GCS position topic subscriber."""
-        # gcs_position.position is already a list of 3 floats [x, y, z]
-        self.command_position[0] = float(gcs_position.position[0])
-        self.command_position[1] = float(gcs_position.position[1])
-        self.command_position[2] = float(gcs_position.position[2])
+        # msg.position is already a list of 3 floats [x, y, z]
+        self.vehicle_pos_cmd = msg
+        self.command_position[0] = float(msg.position[0])
+        self.command_position[1] = float(msg.position[1])
+        self.command_position[2] = float(msg.position[2])
 
     def vehicle_local_position_callback(self, vehicle_local_position):
         """Callback function for vehicle_local_position topic subscriber."""
@@ -344,6 +347,11 @@ class OffboardControl(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_control_mode_publisher.publish(msg)
+    
+    def publish_trajectory_setpoint(self):
+        """Publish the trajectory setpoint."""
+        self.trajectory_setpoint_publisher.publish(self.vehicle_pos_cmd)
+        # self.get_logger().info(f"Publishing position setpoints {[x, y, z]}")
 
     def publish_position_setpoint(self, x: float, y: float, z: float, vx: float = float('nan'), vy: float = float('nan'), vz: float = float('nan')) -> None:
         """Publish the trajectory setpoint."""
@@ -405,8 +413,9 @@ class OffboardControl(Node):
                 self.get_logger().info(f"Offboard, Flight Check Failed")
 
             self.publish_offboard_control_heartbeat_signal()
-            self.publish_position_setpoint(
-                self.command_position[0], self.command_position[1], self.command_position[2])
+            self.publish_trajectory_setpoint()
+            #self.publish_position_setpoint(
+            #    self.command_position[0], self.command_position[1], self.command_position[2])
 
         if self.uav_state == UAVState.LANDING:
             if (self.nav_state == VehicleStatus.NAVIGATION_STATE_AUTO_LAND):
