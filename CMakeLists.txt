@@ -126,6 +126,7 @@ install(PROGRAMS
   src/examples/offboard_py/offboard_control.py
   src/examples/offboard_py/offboard_control3.py
   src/examples/offboard_py/offboard_control_status.py
+  src/examples/offboard_py/offboard_morgado.py
   src/examples/offboard_py/offboard_control_mission.py
   src/examples/offboard_py/offboard_controlMUAV.py
   src/examples/offboard_py/offboard_controlMUAVsteps.py

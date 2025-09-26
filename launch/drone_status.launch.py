@@ -28,7 +28,7 @@ def generate_launch_description():
         Node(
             package='px4_ros_com',
             namespace=namespace,
-            executable='offboard_morgado.py',
+            executable='offboard_control_status.py',
             name='control',
             output='screen',
             parameters= [
