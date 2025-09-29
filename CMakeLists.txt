@@ -28,6 +28,26 @@ find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(rclpy REQUIRED)
 
+# ##############################################################################
+# Generate ROS messages, ROS2 interfaces and IDL files #
+# ##############################################################################
+
+# get all msg files
+set(MSGS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/msg")
+file(GLOB MUAV_COMMON_MSGS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "${MSGS_DIR}/*.msg")
+
+# get all srv files
+set(SRVS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/srv")
+file(GLOB MUAV_COMMON_SRVS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "${SRVS_DIR}/*.srv")
+
+# Generate introspection typesupport for C and C++ and IDL files
+rosidl_generate_interfaces(${PROJECT_NAME}
+	${MUAV_COMMON_MSGS}
+	${MUAV_COMMON_SRVS}
+	DEPENDENCIES builtin_interfaces sensor_msgs
+	ADD_LINTER_TESTS
+)
+
 #################
 # Setup targets #
 #################
@@ -127,7 +147,7 @@ install(PROGRAMS
   src/examples/offboard_py/offboard_control3.py
   src/examples/offboard_py/offboard_control_status.py
   src/examples/offboard_py/offboard_morgado.py
-  src/examples/offboard_py/offboard_control_mission.py
+  src/examples/offboard_py/offboard_mission.py
   src/examples/offboard_py/offboard_controlMUAV.py
   src/examples/offboard_py/offboard_controlMUAVsteps.py
   src/examples/offboard_py/ground_command.py

@@ -1,19 +1,35 @@
 # repo:
+
 https://github.com/arpoma16/px4_ros_com
+
+# references
+
+- https://github.com/mcgill-robotics/drone-2024/blob/c5bc3f902e2a67ead6bdcb762e8a2ce596284172/onboard_ws/src/px4_offboard_control/px4_offboard_control/offboard_node.py#L148
+- https://gitlab.cylab.be/L.Carpi/px4-offboard-multiagent
+- https://github.com/DroneBlocks/dexi/blob/68836063bc433c48e51535f44e48b808102415fe/dexi_py/dexi_py/px4_offboard_manager.py#L324
+- https://github.com/ARK-Electronics/ROS2_PX4_Offboard_Example/blob/master/px4_offboard/px4_offboard/velocity_control.py#L115
+
+# launch
+
+for recive all commands from outside use
+
+- ros2 run px4_ros_com ground_status.py
+- ros2 launch px4_ros_com drone_test.launch.py
+
+for recive all commands from outside y yand offboard preporcess that
+
+- ros2 run px4_ros_com ground_command.py
+- ros2 launch px4_ros_com drone_real.launch.py
+
 # ground publish messages:
+
 ros2 run px4_ros_com ground_command.py
 
-
 # drone offboard script:
+
 ros2 launch px4_ros_com drone_real.launch.py
 
 en el launch se puede configurar el nombre nombre del drone(name_espace) y el mav_system_id
-
-
-# drone offboard codes:
-/px4_3/fmu/in/vehicle_command_offboard :  recive los commandos desde tierra del drone   igual que el topico vehicle_commnad
-/px4_3/fmu/out/vehicle_command_offboard_ack : devuelve la respues de los commandos igual que el topico vehicle_command_ack
-/px4_3/fmu/in/trajectory_setpoint_offboard : recive las posiciones a las que se tiene que mover el drone igual que el topico trajectory_setpoint
 
 # PX4-ROS2 bridge
 
@@ -36,3 +52,9 @@ Use the [Issues](https://github.com/PX4/px4_ros_com/issues) section to create a 
 ## Questions and troubleshooting
 
 Reach the PX4 development team on the [PX4 Discord Server](https://discord.gg/dronecode).
+
+# drone offboard codes:
+
+/px4_3/fmu/in/vehicle_command_offboard : recive los commandos desde tierra del drone igual que el topico vehicle_commnad
+/px4_3/fmu/out/vehicle_command_offboard_ack : devuelve la respues de los commandos igual que el topico vehicle_command_ack
+/px4_3/fmu/in/trajectory_setpoint_offboard : recive las posiciones a las que se tiene que mover el drone igual que el topico trajectory_setpoint

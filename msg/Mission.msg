@@ -1,0 +1,9 @@
+string type
+sensor_msgs/NavSatFix[] waypoint
+float64 radius
+float64 vel_max
+float64 vel_idle
+std_msgs/Float64MultiArray yaw
+int8 yaw_mode
+int8 trace_mode
+int8 finish_action

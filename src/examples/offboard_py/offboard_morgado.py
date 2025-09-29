@@ -41,7 +41,7 @@ class OffboardControl(Node):
 
         # Create subscribers
         self.gcs_logger_subscriber = self.create_subscription(
-            TrajectorySetpoint, f'{self.ns}/fmu/in/trajectory_setpoint_offboard', self.gcs_position_callback, qos_profile)
+            TrajectorySetpoint, f'{self.ns}/fmu/in/trajectory_setpoint_offboard', self.gcs_trajectory_setpoint_callback, qos_profile)
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, f'{self.ns}/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
@@ -72,7 +72,7 @@ class OffboardControl(Node):
 
 
 
-    def gcs_position_callback(self, msg: TrajectorySetpoint):
+    def gcs_trajectory_setpoint_callback(self, msg: TrajectorySetpoint):
         """Callback function for GCS position topic subscriber."""
         self.vehicle_pos_cmd=msg
 
