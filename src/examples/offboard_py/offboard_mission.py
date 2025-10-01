@@ -10,6 +10,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from px4_msgs.msg import TelemetryStatus,OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleCommandAck,VehicleLocalPosition, VehicleStatus,GotoSetpoint
 from std_srvs.srv import Trigger
 from px4_msgs.srv import VehicleCommand as VehicleCommandSrv
+from px4_ros_com.srv import MissionLoad
 from enum import Enum
 
 def fmt_float(val):
@@ -80,9 +81,9 @@ class OffboardControl(Node):
             VehicleCommandAck, f'{self.ns}/offboard/out/vehicle_command_ack', qos_profile)
                 # Create services for takeoff and landing
         self.vehicle_cmd_offboard_service = self.create_service(
-            VehicleCommandSrv, f'{self.ns}/offboard/mission_load', self.handle_vehicle_cmd_request)
-
-
+            VehicleCommandSrv, f'{self.ns}/offboard/vehicle_command', self.handle_vehicle_cmd_request)
+        self.mission_load_service = self.create_service(
+            MissionLoad, f'{self.ns}/offboard/mission_load', self.handle_mission_load_request)
 
         # Initialize variables
         self.offboard_setpoint_counter = 0
@@ -101,6 +102,42 @@ class OffboardControl(Node):
 
         self.timer = self.create_timer(0.1, self.timer_callback)
         self.get_logger().info('Timer for control commands created (100ms).')
+
+    def handle_mission_load_request(self, request, response):
+        """Handle mission load service requests."""
+        self.get_logger().info(f"Received mission load request with {request.num_waypoints} waypoints.")
+        if request.num_waypoints > 0:
+            self.wp = []
+            for wp in request.waypoints:
+                self.wp.append([wp.x, wp.y, wp.z])
+            response.success = True
+            response.message = f"Loaded {request.num_waypoints} waypoints."
+            self.get_logger().info(response.message)
+            # Reset waypoint index and set UAV state to IDLE to start mission
+            self.wp_index = 0
+            self.uav_state = UAVState.IDLE
+            # Set takeoff height based on first waypoint if available
+            if len(self.wp) > 0:
+                self.takeoff_height = self.wp[0][2]
+                self.takeoff_point = [self.wp[0][0], self.wp[0][1], 0.0]
+                self.get_logger().info(f"Takeoff height set to {self.takeoff_height} based on first waypoint.")
+            else:
+                self.takeoff_height = self.default_takeoff_height
+                self.takeoff_point = [0.0, 0.0, 0.0]
+                self.get_logger().info(f"No waypoints provided, using default takeoff height {self.takeoff_height}.")
+        else:
+            response.success = False
+            response.message = "No waypoints provided."
+            self.get_logger().warn(response.message)
+        return response
+
+    def handle_vehicle_cmd_request(self, request, response):
+        """Handle vehicle command service requests."""
+        self.get_logger().info(f"Received vehicle command request: {request.command} param1: {request.param1} param2: {request.param2} param3: {request.param3} param4: {request.param4} param5: {request.param5} param6: {request.param6} param7: {request.param7}")
+        self.publish_vehicle_command(request.command, param1=request.param1, param2=request.param2, param3=request.param3, param4=request.param4, param5=request.param5, param6=request.param6, param7=request.param7)
+        response.success = True
+        response.result = 0  # Assuming 0 indicates success
+        return response
 
     def vehicle_cmd_offboard_callback(self, vehicle_command):
         """Callback function for vehicle_command_offboard topic subscriber."""
