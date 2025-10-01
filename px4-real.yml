@@ -1,0 +1,24 @@
+# ./.tmuxinator.yml
+
+name: px4_missions
+root: ~/
+
+windows:
+  - PX4-real:
+      layout: tiled
+      # Synchronize all panes of this window, can be enabled before or after the pane commands run.
+      # 'before' represents legacy functionality and will be deprecated in a future release, in favour of 'after'
+      # synchronize: after
+      panes:
+        - main:
+            - sleep 2
+            - MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600
+        - multimaster:
+            - sleep 10
+            - ros2 launch px4_ros_com drone_test.launch.py namespace:=px4_1 mav_sys_id:=1
+        - vision:
+            - sleep 10
+            - cd /home/grvc/ai-safe-ws
+            - source install/setup.bash
+            - ros2 launch ai_safe_launch ai_safe_local_rgb_rc_03.launch.py
+         

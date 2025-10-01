@@ -3,7 +3,7 @@
 https://github.com/arpoma16/px4_ros_com
 
 # references
-
+grvc ALL=(ALL:ALL) NOPASSWD: /usr/local/bin/MicroXRCEAgent
 - https://github.com/mcgill-robotics/drone-2024/blob/c5bc3f902e2a67ead6bdcb762e8a2ce596284172/onboard_ws/src/px4_offboard_control/px4_offboard_control/offboard_node.py#L148
 - https://gitlab.cylab.be/L.Carpi/px4-offboard-multiagent
 - https://github.com/DroneBlocks/dexi/blob/68836063bc433c48e51535f44e48b808102415fe/dexi_py/dexi_py/px4_offboard_manager.py#L324
@@ -14,12 +14,14 @@ https://github.com/arpoma16/px4_ros_com
 for recive all commands from outside use
 
 - ros2 run px4_ros_com ground_status.py
-- ros2 launch px4_ros_com drone_test.launch.py
+- ros2 launch px4_ros_com drone_test.launch.py namespace:=px4_1 mav_sys_id:=1
 
 for recive all commands from outside y yand offboard preporcess that
 
 - ros2 run px4_ros_com ground_command.py
 - ros2 launch px4_ros_com drone_real.launch.py
+# tmuxinator
+use the file px4-real.yml
 
 # ground publish messages:
 

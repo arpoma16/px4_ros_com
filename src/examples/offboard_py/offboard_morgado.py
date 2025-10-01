@@ -92,7 +92,8 @@ class OffboardControl(Node):
         if not self.ready:
             return
         self.offboard_heartbet()
-        self.trajectory_setpoint_publisher.publish(self.vehicle_pos_cmd)
+        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+            self.trajectory_setpoint_publisher.publish(self.vehicle_pos_cmd)
 
 def main(args=None) -> None:
     print('Starting offboard control node...')
